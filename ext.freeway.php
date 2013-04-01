@@ -17,9 +17,9 @@ class Freeway_ext {
 	/**
 	 * Required vars
 	 */
-	var $name = 'Freeway';
+	var $name = 'Freeway - MODIFIED';
 	var $description = 'A routing system for EE';
-	var $version = '0.0.3';
+	var $version = '0.0.4';
 	var $settings_exist = 'y';
 	var $docs_url = 'http://github.com/averyvery/Freeway#readme';
 
@@ -93,7 +93,7 @@ class Freeway_ext {
 		$this->param_pattern  = '#(';    // begin match group
 		$this->param_pattern .=   '\?';    // match a '?';
 		$this->param_pattern .=   '|';   // OR
-		$this->param_pattern .=   '\&';    // match a '?';
+		$this->param_pattern .=   '\&';    // match a '&';
 		$this->param_pattern .= ')';    // end match group
 		$this->param_pattern .= '.*$';   // continue matching characters until end of string
 		$this->param_pattern .= '#';    // end match
@@ -137,9 +137,37 @@ class Freeway_ext {
 
 	}
 
-	function convert_pattern_to_regex($pattern){
+	function convert_pattern_to_regex(&$pattern){
 		$regex = preg_replace('#\{\{.*?\}\}#', '.*?', $pattern);
-    return '#^' . $regex . '($|/)#';
+		return '#^' . $regex . '($|/)#';
+	}
+
+	function match_channel_variables(&$pattern){
+
+		foreach (explode('/', $pattern) as $i => $pattern_segment){
+			$does_match = preg_match('#\{\{(.+?)_(url_title|entry_id):(.+?)\}\}#', $pattern_segment, $match);
+
+			if ($does_match){
+				$channel = $this->EE->db->escape($match[1]);
+				$segment = $this->EE->db->escape($this->EE->uri->segment($i+1));
+				$results = $this->EE->db->query("
+					SELECT 1
+					FROM exp_channels ch
+					INNER JOIN exp_channel_titles ct
+						ON ct.channel_id = ch.channel_id
+					WHERE ch.channel_name = $channel
+					  AND ct.$match[2] = $segment
+				");
+
+				if ($results->num_rows > 0){
+					$pattern = str_replace($match[0], '{{'.$match[3].'}}', $pattern);
+				} else{
+					return false;
+				}
+			}
+		}
+
+		return true;
 	}
 
 	function uri_matches_pattern(){
@@ -150,24 +178,28 @@ class Freeway_ext {
 		foreach($reversed_routes as $pattern => $route){
 
 			$pattern_matches = Array();
-			$pattern_match_regex =	$this->convert_pattern_to_regex($pattern);
+			$pattern_match_regex = $this->convert_pattern_to_regex($pattern);
 			preg_match($pattern_match_regex, $this->original_uri, $pattern_matches);
-			$match_occurred = isset($pattern_matches[0]);
 
-			if($match_occurred){
+			if(isset($pattern_matches[0])){
 
-				$this->log('Matched Pattern', $pattern);
-				$this->log('Matched Route', $route);
-				$this->route = $route;
-				$this->pattern = $pattern;
-				break;
+				// The pattern matched, but do the channel variables?
+				$variable_match = $this->match_channel_variables($pattern);
+
+				if($variable_match){
+					$match_occurred = true;
+					$this->log('Matched Pattern', $pattern);
+					$this->log('Matched Route', $route);
+					$this->route = $route;
+					$this->pattern = $pattern;
+					break;
+				}
 
 			}
 
 		};
 
 		return $match_occurred;
-
 	}
 
 	function parse_new_uri_from_route(){
